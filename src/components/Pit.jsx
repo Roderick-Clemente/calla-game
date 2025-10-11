@@ -14,7 +14,7 @@ const Pit = ({
 
   return (
     <div
-      className={`pit ${isClickable ? 'clickable' : ''} ${isCenterPit ? 'center-pit' : ''} ${isHighlighted ? 'highlighted' : ''}`}
+      className={`pit ${isClickable ? 'clickable' : ''} ${isCenterPit ? 'center-pit' : ''} ${isHighlighted ? 'highlighted' : ''} pit-player-${player.toLowerCase()}`}
       onClick={onClick}
     >
       {player === 'A' ? (

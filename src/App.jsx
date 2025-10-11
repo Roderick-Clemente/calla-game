@@ -19,7 +19,6 @@ function App() {
 
   // Manual move state
   const [cubesInHand, setCubesInHand] = useState(0);
-  const [startPit, setStartPit] = useState(null); // {side: 'A'|'B', index: number}
   const [nextHighlight, setNextHighlight] = useState(null); // Next position to click
 
   // Calculate next position counter-clockwise
@@ -68,39 +67,38 @@ function App() {
     return null;
   };
 
-  // Check if current player has any moves
-  const hasMovesAvailable = (player) => {
-    const pits = player === 'A' ? board.playerA : board.playerB;
-    return pits.some(cubes => cubes > 0);
-  };
-
   // Check for game end conditions
-  const checkGameEnd = () => {
-    // Check if current player has no cubes
-    if (!hasMovesAvailable(currentPlayer)) {
+  const checkGameEnd = (currentBoard) => {
+    // Check for instant win (17+ cubes)
+    if (currentBoard.callaA >= 17) {
       setGameOver(true);
-      const scoreA = board.callaA;
-      const scoreB = board.callaB;
+      setMessage(`Game Over! Player 1 wins instantly with ${currentBoard.callaA} cubes!`);
+      return true;
+    }
+    if (currentBoard.callaB >= 17) {
+      setGameOver(true);
+      setMessage(`Game Over! Player 2 wins instantly with ${currentBoard.callaB} cubes!`);
+      return true;
+    }
+
+    // Check if either player has no cubes left to move
+    const playerAHasMoves = currentBoard.playerA.some(cubes => cubes > 0);
+    const playerBHasMoves = currentBoard.playerB.some(cubes => cubes > 0);
+
+    if (!playerAHasMoves || !playerBHasMoves) {
+      setGameOver(true);
+      const scoreA = currentBoard.callaA;
+      const scoreB = currentBoard.callaB;
+
+      const noMovesPlayer = !playerAHasMoves ? 'Player 1' : 'Player 2';
 
       if (scoreA > scoreB) {
-        setMessage(`Game Over! Player 1 wins with ${scoreA} cubes!`);
+        setMessage(`Game Over! ${noMovesPlayer} ran out of cubes. Player 1 wins with ${scoreA} cubes!`);
       } else if (scoreB > scoreA) {
-        setMessage(`Game Over! Player 2 wins with ${scoreB} cubes!`);
+        setMessage(`Game Over! ${noMovesPlayer} ran out of cubes. Player 2 wins with ${scoreB} cubes!`);
       } else {
-        setMessage(`Game Over! It's a tie with ${scoreA} cubes each!`);
+        setMessage(`Game Over! ${noMovesPlayer} ran out of cubes. It's a tie with ${scoreA} cubes each!`);
       }
-      return true;
-    }
-
-    // Check for instant win (17+ cubes)
-    if (board.callaA >= 17) {
-      setGameOver(true);
-      setMessage(`Game Over! Player 1 wins instantly with ${board.callaA} cubes!`);
-      return true;
-    }
-    if (board.callaB >= 17) {
-      setGameOver(true);
-      setMessage(`Game Over! Player 2 wins instantly with ${board.callaB} cubes!`);
       return true;
     }
 
@@ -129,10 +127,8 @@ function App() {
     setBoard(newBoard);
     setCubesInHand(cubes);
 
-    const start = { side: currentPlayer, index: pitIndex, isCalla: false };
-    setStartPit(start);
-
     // Calculate next position
+    const start = { side: currentPlayer, index: pitIndex, isCalla: false };
     const next = getNextPosition(start, currentPlayer === 'A');
     setNextHighlight(next);
 
@@ -213,11 +209,16 @@ function App() {
         }
       }
 
-      // Reset manual move state
-      setStartPit(null);
+      // Update board state before checking for game end
+      setBoard(newBoard);
       setNextHighlight(null);
 
-      // Switch turns if not free turn
+      // Check for game end immediately
+      if (checkGameEnd(newBoard)) {
+        return; // Game is over, no more actions
+      }
+
+      // Switch turns if not a free turn
       if (!freeTurn) {
         setTimeout(() => {
           const nextPlayer = currentPlayer === 'A' ? 'B' : 'A';
@@ -225,17 +226,7 @@ function App() {
           if (!captured) {
             setMessage(`Player ${nextPlayer === 'A' ? '1' : '2'}: Select a pit to pick up cubes`);
           }
-
-          // Check game end
-          setTimeout(() => {
-            checkGameEnd();
-          }, 100);
         }, 1000);
-      } else {
-        // Check game end even on free turn
-        setTimeout(() => {
-          checkGameEnd();
-        }, 100);
       }
     }
   };
@@ -319,22 +310,21 @@ function App() {
 
     setBoard(newBoard);
 
+    // Check for game end immediately
+    if (checkGameEnd(newBoard)) {
+      return; // Game is over
+    }
+
     // Switch turns or give free turn
-    setTimeout(() => {
-      if (!freeTurn) {
+    if (!freeTurn) {
+      setTimeout(() => {
         const nextPlayer = currentPlayer === 'A' ? 'B' : 'A';
         setCurrentPlayer(nextPlayer);
-
         if (!captured) {
           setMessage(`Player ${nextPlayer === 'A' ? '1' : '2'}: Select a pit to pick up cubes`);
         }
-      }
-
-      // Check game end
-      setTimeout(() => {
-        checkGameEnd();
-      }, 100);
-    }, 500);
+      }, 500);
+    }
   };
 
   // Handle pit click (manual or auto)
@@ -365,7 +355,6 @@ function App() {
     setMessage('Player 1: Select a pit to pick up cubes');
     setGameOver(false);
     setCubesInHand(0);
-    setStartPit(null);
     setNextHighlight(null);
   };
 
