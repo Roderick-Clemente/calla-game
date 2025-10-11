@@ -8,7 +8,8 @@ const GameInfo = ({
   onLearningModeChange,
   onReset,
   onUndoPickup,
-  canUndo
+  canUndo,
+  hideControls = false
 }) => {
   return (
     <div className="game-header">
@@ -16,7 +17,8 @@ const GameInfo = ({
       <div className="subtitle">A Mathematics Perseverance Game</div>
       <div className="game-info">
         <div className="message">{message}</div>
-        <div className="controls">
+        {!hideControls && (
+          <div className="controls">
           <label
             className={`auto-move-toggle ${learningMode ? 'disabled' : ''}`}
             title={learningMode ? "Auto-move not available in learning mode" : "Automatically distribute cubes when you click a pit"}
@@ -52,6 +54,7 @@ const GameInfo = ({
             New Game
           </button>
         </div>
+        )}
       </div>
     </div>
   );
