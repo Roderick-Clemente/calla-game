@@ -16,10 +16,13 @@ function App() {
   const [message, setMessage] = useState('Player 1: Select a pit to pick up cubes');
   const [gameOver, setGameOver] = useState(false);
   const [autoMove, setAutoMove] = useState(false);
+  const [learningMode, setLearningMode] = useState(false);
 
   // Manual move state
   const [cubesInHand, setCubesInHand] = useState(0);
   const [nextHighlight, setNextHighlight] = useState(null); // Next position to click
+  const [originalPickup, setOriginalPickup] = useState(null); // Track where cubes were picked up from
+  const [cubesPlaced, setCubesPlaced] = useState(0); // Track if any cubes have been placed
 
   // Calculate next position counter-clockwise
   const getNextPosition = (currentPos, isPlayerA) => {
@@ -126,6 +129,8 @@ function App() {
 
     setBoard(newBoard);
     setCubesInHand(cubes);
+    setOriginalPickup({ player: currentPlayer, pitIndex, cubes }); // Track original location
+    setCubesPlaced(0); // Reset cubes placed counter
 
     // Calculate next position
     const start = { side: currentPlayer, index: pitIndex, isCalla: false };
@@ -158,6 +163,7 @@ function App() {
     }
 
     setBoard(newBoard);
+    setCubesPlaced(prev => prev + 1); // Track that a cube has been placed
 
     const remainingCubes = cubesInHand - 1;
     setCubesInHand(remainingCubes);
@@ -343,6 +349,28 @@ function App() {
     }
   };
 
+  // Undo pickup (learning mode feature)
+  const handleUndoPickup = () => {
+    if (!learningMode || !originalPickup || cubesPlaced > 0) return;
+
+    const newBoard = { ...board };
+    const { player, pitIndex, cubes } = originalPickup;
+
+    // Put cubes back in original pit
+    if (player === 'A') {
+      newBoard.playerA[pitIndex] = cubes;
+    } else {
+      newBoard.playerB[pitIndex] = cubes;
+    }
+
+    setBoard(newBoard);
+    setCubesInHand(0);
+    setNextHighlight(null);
+    setOriginalPickup(null);
+    setCubesPlaced(0);
+    setMessage(`Player ${currentPlayer === 'A' ? '1' : '2'}: Select a pit to pick up cubes`);
+  };
+
   // Reset game
   const resetGame = () => {
     setBoard({
@@ -356,6 +384,8 @@ function App() {
     setGameOver(false);
     setCubesInHand(0);
     setNextHighlight(null);
+    setOriginalPickup(null);
+    setCubesPlaced(0);
   };
 
   // Helper to check if a position should be highlighted
@@ -372,7 +402,11 @@ function App() {
         message={message}
         autoMove={autoMove}
         onAutoMoveChange={setAutoMove}
+        learningMode={learningMode}
+        onLearningModeChange={setLearningMode}
         onReset={resetGame}
+        onUndoPickup={handleUndoPickup}
+        canUndo={learningMode && cubesInHand > 0 && cubesPlaced === 0}
       />
 
       <Board
