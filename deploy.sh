@@ -11,9 +11,9 @@ echo "🎮 Deploying Calla Game..."
 echo "📥 Pulling latest code..."
 git pull
 
-# Install dependencies (production only)
+# Install dependencies (including dev deps needed for build)
 echo "📦 Installing dependencies..."
-npm install --production
+npm install
 
 # Build frontend
 echo "🏗️  Building frontend..."
