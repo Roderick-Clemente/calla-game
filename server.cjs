@@ -5,9 +5,14 @@ const path = require('path');
 
 const app = express();
 const server = http.createServer(app);
+// Configure CORS based on environment
+const corsOrigin = process.env.NODE_ENV === 'production'
+  ? (process.env.CORS_ORIGIN || true) // Allow all in production or specific origin from env
+  : "http://localhost:5173"; // Dev server in development
+
 const io = socketIo(server, {
   cors: {
-    origin: "http://localhost:5173", // Allow Vite dev server
+    origin: corsOrigin,
     methods: ["GET", "POST"]
   }
 });
