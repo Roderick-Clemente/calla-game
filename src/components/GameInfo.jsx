@@ -9,7 +9,8 @@ const GameInfo = ({
   onReset,
   onUndoPickup,
   canUndo,
-  hideControls = false
+  hideControls = false,
+  isNetworkMode = false
 }) => {
   return (
     <div className="game-header">
@@ -32,16 +33,16 @@ const GameInfo = ({
             Auto-move cubes
           </label>
           <label
-            className={`auto-move-toggle ${autoMove ? 'disabled' : ''}`}
-            title={autoMove ? "Learning mode not available with auto-move" : "Allows you to pick up and put back down cubes before placing your first cube"}
+            className={`auto-move-toggle ${autoMove || isNetworkMode ? 'disabled' : ''}`}
+            title={isNetworkMode ? "Learning mode is set before matchmaking" : autoMove ? "Learning mode not available with auto-move" : "Allows you to pick up and put back down cubes before placing your first cube"}
           >
             <input
               type="checkbox"
               checked={learningMode}
               onChange={(e) => onLearningModeChange(e.target.checked)}
-              disabled={autoMove}
+              disabled={autoMove || isNetworkMode}
             />
-            Learning mode
+            Learning mode {isNetworkMode && '(locked)'}
           </label>
           <button
             className={`undo-btn ${canUndo ? '' : 'disabled'}`}
@@ -50,9 +51,11 @@ const GameInfo = ({
           >
             Undo Pickup
           </button>
-          <button className="new-game-btn" onClick={onReset}>
-            New Game
-          </button>
+          {!isNetworkMode && (
+            <button className="new-game-btn" onClick={onReset}>
+              New Game
+            </button>
+          )}
         </div>
         )}
       </div>

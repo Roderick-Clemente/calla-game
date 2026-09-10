@@ -7,7 +7,7 @@ import Board from './Board';
  * NetworkGame - Online multiplayer via Socket.IO
  * Players connect to a server and play against each other
  */
-function NetworkGame({ onBackToMenu }) {
+function NetworkGame({ onBackToMenu, settings }) {
   const [socket, setSocket] = useState(null);
   const [gameId, setGameId] = useState(null);
   const [playerLetter, setPlayerLetter] = useState(null); // 'A' or 'B'
@@ -15,6 +15,10 @@ function NetworkGame({ onBackToMenu }) {
   const [gameStarted, setGameStarted] = useState(false);
   const hasConnected = useRef(false); // Prevent double connection in Strict Mode
   const playerLetterRef = useRef(null); // Ref to access playerLetter in event handlers
+
+  // Extract settings
+  const [autoMove, setAutoMove] = useState(settings?.autoMove ?? false);
+  const learningMode = settings?.learningMode ?? false; // Learning mode locked (set before matchmaking)
 
   // Game state
   const [board, setBoard] = useState({
@@ -28,12 +32,71 @@ function NetworkGame({ onBackToMenu }) {
   const [message, setMessage] = useState('Waiting for game to start...');
   const [gameOver, setGameOver] = useState(false);
 
+  // Manual move state (for non-auto mode)
+  const [cubesInHand, setCubesInHand] = useState(0);
+  const [nextHighlight, setNextHighlight] = useState(null);
+  const [originalPickup, setOriginalPickup] = useState(null);
+  const [cubesPlaced, setCubesPlaced] = useState(0);
+  const [moveSentToServer, setMoveSentToServer] = useState(false);
+  const [queuedUpdate, setQueuedUpdate] = useState(null);
+  const cubesInHandRef = useRef(0); // Ref to check cubesInHand in event handlers
+
+  // Helper to update both cubesInHand state and ref
+  const updateCubesInHand = (value) => {
+    setCubesInHand(value);
+    cubesInHandRef.current = value;
+  };
+
+  // Calculate next position counter-clockwise (for manual moves)
+  const getNextPosition = (currentPos, isPlayerA) => {
+    if (!currentPos) return null;
+
+    const { side, index } = currentPos;
+
+    if (side === 'A') {
+      if (index < 4) {
+        return { side: 'A', index: index + 1, isCalla: false };
+      } else {
+        if (isPlayerA) {
+          return { side: 'callaA', index: null, isCalla: true };
+        } else {
+          return { side: 'B', index: 0, isCalla: false };
+        }
+      }
+    } else if (side === 'callaA') {
+      return { side: 'B', index: 0, isCalla: false };
+    } else if (side === 'B') {
+      if (index < 4) {
+        return { side: 'B', index: index + 1, isCalla: false };
+      } else {
+        if (!isPlayerA) {
+          return { side: 'callaB', index: null, isCalla: true };
+        } else {
+          return { side: 'A', index: 0, isCalla: false };
+        }
+      }
+    } else if (side === 'callaB') {
+      return { side: 'A', index: 0, isCalla: false };
+    }
+
+    return null;
+  };
+
   // Connect to server on mount
   useEffect(() => {
     // Prevent double connection in React Strict Mode
     if (hasConnected.current) return;
     hasConnected.current = true;
-    const newSocket = io('http://localhost:3001');
+
+    // Use window.location.origin to connect to the same server that served the page
+    // In development: Vite dev server is on 5173, game server is on 3001
+    // In production: Both are served from the same port (game server serves built files)
+    const serverUrl = import.meta.env.DEV
+      ? 'http://localhost:3001'  // Development: explicitly connect to game server
+      : window.location.origin;   // Production: use same origin (ngrok or deployed URL)
+
+    console.log('Connecting to Socket.IO server:', serverUrl);
+    const newSocket = io(serverUrl);
     setSocket(newSocket);
 
     newSocket.on('connect', () => {
@@ -63,9 +126,26 @@ function NetworkGame({ onBackToMenu }) {
     });
 
     newSocket.on('gameUpdate', (data) => {
-      console.log('Game update:', data);
+      console.log('Game update:', data, 'cubesInHandRef:', cubesInHandRef.current);
+
+      // If we're currently placing cubes manually, queue this update
+      // Use ref to get current value (avoid stale closure)
+      if (cubesInHandRef.current > 0) {
+        console.log('Queueing update while placing cubes manually');
+        setQueuedUpdate(data);
+        return;
+      }
+
+      // Apply the update immediately
       setBoard(data.board);
       setCurrentPlayer(data.currentPlayer);
+
+      // Reset manual move state
+      updateCubesInHand(0);
+      setNextHighlight(null);
+      setOriginalPickup(null);
+      setCubesPlaced(0);
+      setMoveSentToServer(false);
 
       if (data.gameOver) {
         setGameOver(true);
@@ -124,14 +204,156 @@ function NetworkGame({ onBackToMenu }) {
 
   // Handle pit click
   const handlePitClick = (pitIndex) => {
-    if (!socket || gameOver || currentPlayer !== playerLetter) return;
+    if (!socket || gameOver || currentPlayer !== playerLetter || cubesInHand > 0) return;
 
     const currentPits = currentPlayer === 'A' ? board.playerA : board.playerB;
 
     if (currentPits[pitIndex] === 0) return;
 
-    // Send move to server
-    socket.emit('makeMove', { pitIndex });
+    // If auto-move is enabled, send immediately to server
+    if (autoMove) {
+      socket.emit('makeMove', { pitIndex });
+      return;
+    }
+
+    // Manual mode: pick up cubes locally (don't send to server yet)
+    const cubes = currentPits[pitIndex];
+
+    // Store original pickup for undo (deep copy the board)
+    setOriginalPickup({
+      player: currentPlayer,
+      pitIndex,
+      cubes,
+      board: {
+        playerA: [...board.playerA],
+        playerB: [...board.playerB],
+        callaA: board.callaA,
+        callaB: board.callaB
+      }
+    });
+
+    // Deep copy the board to avoid mutation
+    const newBoard = {
+      playerA: [...board.playerA],
+      playerB: [...board.playerB],
+      callaA: board.callaA,
+      callaB: board.callaB
+    };
+
+    // Remove cubes from pit
+    if (currentPlayer === 'A') {
+      newBoard.playerA[pitIndex] = 0;
+    } else {
+      newBoard.playerB[pitIndex] = 0;
+    }
+
+    setBoard(newBoard);
+    updateCubesInHand(cubes);
+    setCubesPlaced(0);
+    setMoveSentToServer(false);
+
+    // Calculate first highlight position
+    const isPlayerA = currentPlayer === 'A';
+    const firstPos = getNextPosition({ side: currentPlayer, index: pitIndex }, isPlayerA);
+    setNextHighlight(firstPos);
+
+    setMessage(`Click highlighted pit to place cube (${cubes} remaining)`);
+  };
+
+  // Handle placing a cube (manual mode)
+  const handlePlaceCube = () => {
+    if (cubesInHand === 0 || !nextHighlight) return;
+
+    // On first cube placed, send the move to server
+    if (cubesPlaced === 0 && !moveSentToServer) {
+      console.log('First cube placed - sending move to server');
+      socket.emit('makeMove', { pitIndex: originalPickup.pitIndex });
+      setMoveSentToServer(true);
+      setOriginalPickup(null); // Can't undo after first placement
+    }
+
+    // Deep copy the board to avoid mutation
+    const newBoard = {
+      playerA: [...board.playerA],
+      playerB: [...board.playerB],
+      callaA: board.callaA,
+      callaB: board.callaB
+    };
+    const isPlayerA = currentPlayer === 'A';
+
+    // Place cube at current highlight position
+    if (nextHighlight.isCalla) {
+      if (nextHighlight.side === 'callaA') {
+        newBoard.callaA++;
+      } else {
+        newBoard.callaB++;
+      }
+    } else {
+      if (nextHighlight.side === 'A') {
+        newBoard.playerA[nextHighlight.index]++;
+      } else {
+        newBoard.playerB[nextHighlight.index]++;
+      }
+    }
+
+    setBoard(newBoard);
+    const remainingCubes = cubesInHand - 1;
+    updateCubesInHand(remainingCubes);
+    setCubesPlaced(cubesPlaced + 1);
+
+    if (remainingCubes > 0) {
+      // Calculate next highlight
+      const nextPos = getNextPosition(nextHighlight, isPlayerA);
+      setNextHighlight(nextPos);
+      setMessage(`Click highlighted pit to place cube (${remainingCubes} remaining)`);
+    } else {
+      // All cubes placed - check if there's a queued update
+      setNextHighlight(null);
+      if (queuedUpdate) {
+        console.log('Applying queued update');
+        setBoard(queuedUpdate.board);
+        setCurrentPlayer(queuedUpdate.currentPlayer);
+        updateCubesInHand(0);
+        setOriginalPickup(null);
+        setCubesPlaced(0);
+        setMoveSentToServer(false);
+        setQueuedUpdate(null);
+
+        if (queuedUpdate.gameOver) {
+          setGameOver(true);
+        } else {
+          setMessage(queuedUpdate.currentPlayer === playerLetterRef.current ?
+            (queuedUpdate.freeTurn ? 'Free turn! Select a pit' : 'Your turn! Select a pit') :
+            "Opponent's turn..."
+          );
+        }
+      } else {
+        setMessage("Opponent's turn...");
+      }
+    }
+  };
+
+  // Undo pickup (learning mode only, before first cube is placed)
+  const handleUndoPickup = () => {
+    if (!learningMode || !originalPickup || cubesPlaced > 0) return;
+
+    // Restore original board state
+    setBoard(originalPickup.board);
+    updateCubesInHand(0);
+    setNextHighlight(null);
+    setOriginalPickup(null);
+    setCubesPlaced(0);
+    setMoveSentToServer(false);
+    setMessage(`Player ${currentPlayer === 'A' ? '1' : '2'}: Select a pit to pick up cubes`);
+  };
+
+  // Helper for highlighting
+  const isHighlighted = (side, index, isCalla = false) => {
+    if (!nextHighlight) return false;
+    if (isCalla) {
+      return nextHighlight.isCalla && nextHighlight.side === side;
+    }
+    return !nextHighlight.isCalla && nextHighlight.side === side && nextHighlight.index === index;
   };
 
   const isMyTurn = currentPlayer === playerLetter;
@@ -156,7 +378,7 @@ function NetworkGame({ onBackToMenu }) {
     <div className="game-screen">
       <div className="network-info">
         <div className="player-indicator">
-          You are: Player {playerNum} {playerLetter === 'A' ? '(Top)' : '(Bottom)'}
+          You are: Player {playerNum} {playerLetter === 'A' ? '(Bottom)' : '(Top)'}
         </div>
         <button className="back-btn" onClick={onBackToMenu}>
           Back to Menu
@@ -165,24 +387,25 @@ function NetworkGame({ onBackToMenu }) {
 
       <GameInfo
         message={message}
-        autoMove={false}
-        onAutoMoveChange={() => {}}
-        learningMode={false}
-        onLearningModeChange={() => {}}
-        onReset={() => {}}
-        onUndoPickup={() => {}}
-        canUndo={false}
-        hideControls={true} // Hide controls in network mode
+        autoMove={autoMove}
+        onAutoMoveChange={setAutoMove} // Auto-move is toggleable
+        learningMode={learningMode}
+        onLearningModeChange={() => {}} // Learning mode locked (set before matchmaking)
+        onReset={() => {}} // No reset in network mode
+        onUndoPickup={handleUndoPickup}
+        canUndo={learningMode && originalPickup !== null && cubesPlaced === 0}
+        hideControls={false} // Show controls
+        isNetworkMode={true} // Lock learning mode, hide new game button
       />
 
       <Board
         board={board}
         currentPlayer={currentPlayer}
         gameOver={gameOver}
-        cubesInHand={0}
-        isHighlighted={() => false}
+        cubesInHand={cubesInHand}
+        isHighlighted={isHighlighted}
         handlePitClick={handlePitClick}
-        handlePlaceCube={() => {}}
+        handlePlaceCube={handlePlaceCube}
         isNetworkMode={true}
         isMyTurn={isMyTurn}
       />
